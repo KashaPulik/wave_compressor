@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <math.h>
 
 typedef struct wav_header
 {
@@ -147,17 +148,88 @@ void print_meta(WAV_header header, char *filename)
     printf("Subchunk2Size: %d\n", header.Subchunk2Size);
 }
 
+int *get_data(char *filename, WAV_header header, int header_size)
+{
+    if (filename == NULL)
+        return NULL;
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL)
+        return NULL;
+    int BytesPerSample = header.BitsPerSample / 8;
+    int sample_count = header.Subchunk2Size / BytesPerSample;
+    int *data = malloc(sample_count * sizeof(int));
+    fseek(file, header_size, SEEK_SET);
+    fread(data, BytesPerSample, sample_count, file);
+    fclose(file);
+    return data;
+}
+
+int get_count_of_chunks_in_channel(WAV_header header)
+{
+    int count = header.Subchunk2Size / (header.BitsPerSample / 8) / header.NumChannels;
+    return count;
+}
+
+int *get_left_channel(int *data, int size)
+{
+    int *left_channel = malloc(size * sizeof(int));
+    for (int i = 0; i < size; i++)
+        left_channel[i] = data[i * 2];
+    return left_channel;
+}
+
+int *get_right_channel(int *data, int size)
+{
+    int *right_channel = malloc(size * sizeof(int));
+    for (int i = 0; i < size; i++)
+        right_channel[i] = data[i * 2 + 1];
+    return right_channel;
+}
+
+char *compress_channel(int *channel, int size)
+{
+    char *compressed = malloc(size - 1);
+    double y2, cos;
+    for (int i = 0; i < size - 1; i++)
+    {
+        y2 = (double)(channel[i + 1] - channel[i]);
+        cos = y2 / (sqrt(1.0 + y2 * y2));
+        cos *= 127.0;
+        compressed[i] = (char)round(cos);
+    }
+    return compressed;
+}
+
+void write_file(char *filename, int left_start, int right_start, char *c_left_channel, char *c_right_channel, int channel_size, unsigned char *header, int header_size)
+{
+    FILE *file = fopen(filename, "wb");
+    fwrite(header, 1, header_size, file);
+    fwrite(&left_start, 2, 1, file);
+    fwrite(&right_start, 2, 1, file);
+    for (int i = 0; i < channel_size - 1; i++)
+    {
+        fwrite(c_left_channel, 1, 1, file);
+        fwrite(c_right_channel, 1, 1, file);
+    }
+    fclose(file);
+}
+
 int main(int argc, char *argv[])
 {
-    if (argc != 2)
+    if (argc != 3)
     {
         printf("Arguments incorrect!\n");
-        printf("Use \"./get_header <filename>\"\n");
+        printf("Use \"./compress <input> <output>\"\n");
         return 1;
     }
-    int count;
-    unsigned char *header = get_header(argv[1], &count);
-    WAV_header this_header = fill_header(header, count);
-    free(header);
-    print_meta(this_header, argv[1]);
+    int header_size;
+    unsigned char *raw_header = get_header(argv[1], &header_size);
+    WAV_header header = fill_header(raw_header, header_size);
+    int *data = get_data(argv[1], header, header_size);
+    int chunks_in_channel = get_count_of_chunks_in_channel(header);
+    int *left_channel = get_left_channel(data, chunks_in_channel);
+    int *right_channel = get_right_channel(data, chunks_in_channel);
+    char *c_left_channel = compress_channel(left_channel, chunks_in_channel);
+    char *c_right_channel = compress_channel(right_channel, chunks_in_channel);
+    write_file(argv[2], left_channel[0], right_channel[0], c_left_channel, c_right_channel, chunks_in_channel, raw_header, header_size);
 }
