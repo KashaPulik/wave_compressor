@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://samplefocus.com/
+HostUrl=https://sample-focus-production.s3.us-west-1.amazonaws.com/samples/sample_files/33508/e785b11dc214e293e2f45ff51368f217960ed367/original/_808_01_.wav?response-content-disposition=attachment%3B%20filename%3D808-clean-urban_C_major.wav&response-content-type=audio%2Fwav&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAI2ZJXYGXIVHKFDIA%2F20240813%2Fus-west-1%2Fs3%2Faws4_request&X-Amz-Date=20240813T114221Z&X-Amz-Expires=1200&X-Amz-SignedHeaders=host&X-Amz-Signature=053f47735d558faf6259a0d7164ef6979ea0f7fcb97da8bce5877fc2db0af9bb
