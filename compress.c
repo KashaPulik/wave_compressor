@@ -148,16 +148,18 @@ void print_meta(WAV_header header, char *filename)
     printf("Subchunk2Size: %d\n", header.Subchunk2Size);
 }
 
-int *get_data(char *filename, WAV_header header, int header_size)
+int16_t *get_data_16bit(char *filename, WAV_header header, int header_size)
 {
     if (filename == NULL)
+        return NULL;
+    int BytesPerSample = header.BitsPerSample / 8;
+    if (BytesPerSample != 2)
         return NULL;
     FILE *file = fopen(filename, "rb");
     if (file == NULL)
         return NULL;
-    int BytesPerSample = header.BitsPerSample / 8;
     int sample_count = header.Subchunk2Size / BytesPerSample;
-    int *data = malloc(sample_count * sizeof(int));
+    int16_t *data = malloc(sample_count * BytesPerSample);
     fseek(file, header_size, SEEK_SET);
     fread(data, BytesPerSample, sample_count, file);
     // for (int i = 0; i < sample_count; i++)
@@ -173,23 +175,40 @@ int get_count_of_chunks_in_channel(WAV_header header)
     return count;
 }
 
-int *get_left_channel(int *data, int size)
+int16_t *get_left_channel_16bit(int16_t *data, int size)
 {
-    int *left_channel = malloc(size * sizeof(int));
+    int16_t *left_channel = malloc(size * sizeof(int16_t));
     for (int i = 0; i < size; i++)
         left_channel[i] = data[i * 2];
     return left_channel;
 }
 
-int *get_right_channel(int *data, int size)
+int16_t *get_right_channel_16bit(int16_t *data, int size)
 {
-    int *right_channel = malloc(size * sizeof(int));
+    int16_t *right_channel = malloc(size * sizeof(int16_t));
     for (int i = 0; i < size; i++)
         right_channel[i] = data[i * 2 + 1];
     return right_channel;
 }
 
-char *compress_channel(int *channel, int size)
+int16_t *convert_channel_16bit(int16_t *channel, int size)
+{
+    int16_t *converted = malloc(size * sizeof(int16_t));
+    long double y2, cos, phi;
+    converted[0] = channel[0];
+    for (int i = 0; i < size - 1; i++)
+    {
+        y2 = (long double)(channel[i + 1] - channel[i]);
+        cos = y2 / sqrt(1.0 + y2 * y2);
+        cos = cos > 1.0 ? 1.0 : cos;
+        cos = cos < -1.0 ? -1.0 : cos;
+        phi = acos(cos);
+        converted[i] = (int16_t)round((phi / acos(-1.0)) * 65535 - 32768);
+    }
+    return converted;
+}
+
+char *compress_channel_16bit(int16_t *channel, int size)
 {
     char *compressed = malloc(size - 1);
     double y2, cos;
@@ -206,22 +225,57 @@ char *compress_channel(int *channel, int size)
     return compressed;
 }
 
-int *decompress_channel(char *compressed_channel, int first_sample, int size)
+int16_t *decompress_channel_16bit(char *compressed_channel, int16_t first_sample, int size)
 {
-    int *decompressed = malloc(size);
+    int16_t *decompressed = malloc(size * sizeof(int16_t));
     double cos;
     decompressed[0] = first_sample;
     for (int i = 0; i < size - 1; i++)
     {
         cos = (double)compressed_channel[i] / 127.0;
         // printf("%f\n", cos);
-        decompressed[i + 1] = (int)round(cos / sqrt(1.0 - cos * cos)) + decompressed[i];
+        decompressed[i + 1] = (int16_t)round(cos / sqrt(1.0 - cos * cos)) + decompressed[i];
         // printf("%d\n", decompressed[i]);
     }
     return decompressed;
 }
 
-void write_file(char *filename, int left_start, int right_start, char *c_left_channel, char *c_right_channel, int channel_size, unsigned char *header, int header_size)
+int16_t *convert_back_16bit(int16_t *converted_channel, int size)
+{
+    int16_t *unconverted = malloc(size * sizeof(int16_t));
+    int32_t *tmp = malloc(size * sizeof(int32_t));
+    long double coss;
+    // unconverted[0] = converted_channel[0];
+    // for (int i = 0; i < size - 1; i++)
+    // {
+    //     coss = cos((((double)converted_channel[i + 1] + 32768.0) / 65535) * acos(-1.0));
+    //     unconverted[i + 1] = (int16_t)round(coss / sqrt(1.0 - coss * coss)) + unconverted[i];
+    //     unconverted[i + 1] = unconverted[i + 1] > 32000 ? unconverted[i + 1] - 10 : unconverted[i + 1];
+    //     unconverted[i + 1] = unconverted[i + 1] < 32000 ? unconverted[i + 1] + 10 : unconverted[i + 1];
+    // }
+    tmp[0] = converted_channel[0];
+    int32_t max = abs(tmp[0]);
+    for (int i = 0; i < size - 1; i++)
+    {
+        coss = cos((((long double)converted_channel[i + 1] + 32768.0) / 65535) * acos(-1.0));
+        tmp[i + 1] = (int32_t)round(coss / sqrt(1.0 - coss * coss)) + unconverted[i];
+        if(abs(tmp[i + 1]) > max)
+            max = abs(tmp[i + 1]);
+    }
+
+    int32_t minus = max > 32767 ? max - 32767 : 0;
+    printf("%d\n", minus);
+
+    for(int i = 0; i < size; i++)
+    {
+        unconverted[i] = tmp[i] > 0 ? (int16_t)(tmp[i] - minus) : (int16_t)tmp[i];
+        unconverted[i] = tmp[i] < 0 ? (int16_t)(tmp[i] + minus) : (int16_t)tmp[i];
+    }
+    free(tmp);
+    return unconverted;
+}
+
+void write_file_16bit(char *filename, int16_t left_start, int16_t right_start, char *c_left_channel, char *c_right_channel, int channel_size, unsigned char *header, int header_size)
 {
     FILE *file = fopen(filename, "wb");
     fwrite(header, 1, header_size, file);
@@ -235,7 +289,7 @@ void write_file(char *filename, int left_start, int right_start, char *c_left_ch
     fclose(file);
 }
 
-void write_decompressed_file(char *filename, int *left_channel, int *right_channel, int channel_size, unsigned char *header, int header_size)
+void write_decompressed_file_16bit(char *filename, int16_t *left_channel, int16_t *right_channel, int channel_size, unsigned char *header, int header_size)
 {
     FILE *file = fopen(filename, "wb");
     fwrite(header, 1, header_size, file);
@@ -258,14 +312,14 @@ int main(int argc, char *argv[])
     int header_size;
     unsigned char *raw_header = get_header(argv[1], &header_size);
     WAV_header header = fill_header(raw_header, header_size);
-    int *data = get_data(argv[1], header, header_size);
+    int16_t *data = get_data_16bit(argv[1], header, header_size);
     int chunks_in_channel = get_count_of_chunks_in_channel(header);
-    int *left_channel = get_left_channel(data, chunks_in_channel);
-    int *right_channel = get_right_channel(data, chunks_in_channel);
-    char *c_left_channel = compress_channel(left_channel, chunks_in_channel);
-    char *c_right_channel = compress_channel(right_channel, chunks_in_channel);
-    int *d_left_channel = decompress_channel(c_left_channel, left_channel[0], chunks_in_channel);
-    int *d_right_channel = decompress_channel(c_right_channel, right_channel[0], chunks_in_channel);
+    int16_t *left_channel = get_left_channel_16bit(data, chunks_in_channel);
+    int16_t *right_channel = get_right_channel_16bit(data, chunks_in_channel);
+    int16_t *c_left_channel = convert_channel_16bit(left_channel, chunks_in_channel);
+    int16_t *c_right_channel = convert_channel_16bit(right_channel, chunks_in_channel);
+    int16_t *d_left_channel = convert_back_16bit(c_left_channel, chunks_in_channel);
+    int16_t *d_right_channel = convert_back_16bit(c_right_channel, chunks_in_channel);
     // write_file(argv[2], left_channel[0], right_channel[0], c_left_channel, c_right_channel, chunks_in_channel, raw_header, header_size);
-    write_decompressed_file(argv[2], d_left_channel, d_right_channel, chunks_in_channel, raw_header, header_size);
+    write_decompressed_file_16bit(argv[2], d_left_channel, d_right_channel, chunks_in_channel, raw_header, header_size);
 }
