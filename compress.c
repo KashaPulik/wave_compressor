@@ -160,6 +160,9 @@ int *get_data(char *filename, WAV_header header, int header_size)
     int *data = malloc(sample_count * sizeof(int));
     fseek(file, header_size, SEEK_SET);
     fread(data, BytesPerSample, sample_count, file);
+    // for (int i = 0; i < sample_count; i++)
+    //     if (data[i] != 0)
+    //         printf("%d\n", data[i]);
     fclose(file);
     return data;
 }
@@ -193,11 +196,29 @@ char *compress_channel(int *channel, int size)
     for (int i = 0; i < size - 1; i++)
     {
         y2 = (double)(channel[i + 1] - channel[i]);
-        cos = y2 / (sqrt(1.0 + y2 * y2));
-        cos *= 127.0;
-        compressed[i] = (char)round(cos);
+        cos = y2 / sqrt(1.0 + y2 * y2);
+        // if (cos < 0.9 && cos != 0 && cos > -0.9)
+        //     printf("%f\n", cos);
+        compressed[i] = (char)round(cos * 127.0);
+        // if (compressed[i] != 0)
+        //     printf("%d\n", compressed[i]);
     }
     return compressed;
+}
+
+int *decompress_channel(char *compressed_channel, int first_sample, int size)
+{
+    int *decompressed = malloc(size);
+    double cos;
+    decompressed[0] = first_sample;
+    for (int i = 0; i < size - 1; i++)
+    {
+        cos = (double)compressed_channel[i] / 127.0;
+        // printf("%f\n", cos);
+        decompressed[i + 1] = (int)round(cos / sqrt(1.0 - cos * cos)) + decompressed[i];
+        // printf("%d\n", decompressed[i]);
+    }
+    return decompressed;
 }
 
 void write_file(char *filename, int left_start, int right_start, char *c_left_channel, char *c_right_channel, int channel_size, unsigned char *header, int header_size)
@@ -208,8 +229,20 @@ void write_file(char *filename, int left_start, int right_start, char *c_left_ch
     fwrite(&right_start, 2, 1, file);
     for (int i = 0; i < channel_size - 1; i++)
     {
-        fwrite(c_left_channel, 1, 1, file);
-        fwrite(c_right_channel, 1, 1, file);
+        fwrite(&c_left_channel[i], 1, 1, file);
+        fwrite(&c_right_channel[i], 1, 1, file);
+    }
+    fclose(file);
+}
+
+void write_decompressed_file(char *filename, int *left_channel, int *right_channel, int channel_size, unsigned char *header, int header_size)
+{
+    FILE *file = fopen(filename, "wb");
+    fwrite(header, 1, header_size, file);
+    for (int i = 0; i < channel_size; i++)
+    {
+        fwrite(&left_channel[i], 2, 1, file);
+        fwrite(&right_channel[i], 2, 1, file);
     }
     fclose(file);
 }
@@ -231,5 +264,8 @@ int main(int argc, char *argv[])
     int *right_channel = get_right_channel(data, chunks_in_channel);
     char *c_left_channel = compress_channel(left_channel, chunks_in_channel);
     char *c_right_channel = compress_channel(right_channel, chunks_in_channel);
-    write_file(argv[2], left_channel[0], right_channel[0], c_left_channel, c_right_channel, chunks_in_channel, raw_header, header_size);
+    int *d_left_channel = decompress_channel(c_left_channel, left_channel[0], chunks_in_channel);
+    int *d_right_channel = decompress_channel(c_right_channel, right_channel[0], chunks_in_channel);
+    // write_file(argv[2], left_channel[0], right_channel[0], c_left_channel, c_right_channel, chunks_in_channel, raw_header, header_size);
+    write_decompressed_file(argv[2], d_left_channel, d_right_channel, chunks_in_channel, raw_header, header_size);
 }
